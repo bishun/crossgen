@@ -12,12 +12,12 @@ pip install PyQt5
 
 Install PyQt5 on Linux:
 ```
-sudo apt install python3-pyqt5 # Debian/Ubuntu
+sudo apt install python3-pyqt5
 ```
 
 Install PyQt5 on Mac:
 ```
-brew install pyqt5 # macOS (Homebrew)
+brew install pyqt5
 ```
 
 
