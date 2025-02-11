@@ -1,13 +1,25 @@
 # crossgen
 A Python script that draws pixels on the center of the screen on top of any other windows, regardless of focus.
 
-Dependency required: PyQt5 (Windows)
-> pip install PyQt5
+### Dependency: PyQt5 
 
-Linux/Mac may require:
-> sudo apt install python3-pyqt5 # Debian/Ubuntu
-> 
-> brew install pyqt5 # macOS (Homebrew)
+
+
+Install PyQt5 on Windows:
+```
+pip install PyQt5
+```
+
+Install PyQt5 on Linux:
+```
+sudo apt install python3-pyqt5 # Debian/Ubuntu
+```
+
+Install PyQt5 on Mac:
+```
+brew install pyqt5 # macOS (Homebrew)
+```
+
 
 
 ### Examples
