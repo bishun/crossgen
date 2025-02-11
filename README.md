@@ -7,6 +7,7 @@ Dependency required: PyQt5
 
 ### Examples
 
-![ring](https://github.com/bishun/crossgen/assets/13504325/8da9dd89-0feb-4712-9571-c4e4c0658f1c)
 
-![cross](https://github.com/bishun/crossgen/assets/13504325/574c54d6-741c-4759-baa9-7e373081806e)
+![CROSS11](https://github.com/user-attachments/assets/a19fca69-9b7a-452a-a22f-39fd5de8f137)
+
+![CROS112](https://github.com/user-attachments/assets/203c4fd4-f9ae-46d1-830a-08623d41baff)
