@@ -16,10 +16,13 @@ class CrosshairCanvas(QtWidgets.QWidget):
         self.gap = self.settings.get('gap', 0)  # Ensure gap is initialized
 
     def initUI(self):
-        # Calculate even size
-        self.size = self.settings['size'] if self.settings['size'] % 2 == 0 else self.settings['size'] + 1
+        print("Initializing CrosshairCanvas with size:", self.settings['size'])
+        # Calculate even size with strict minimum of 8
+        self.size = max(8, self.settings['size'])
+        if self.size % 2 != 0:
+            self.size += 1
         self.center = self.size // 2
-        self.gap = self.settings.get('gap', 0)
+        self.gap = min(self.settings.get('gap', 0), self.center - 1)
         
         # Set window properties
         self.setFixedSize(self.size, self.size)
@@ -27,7 +30,7 @@ class CrosshairCanvas(QtWidgets.QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(False)
 
-        # Fix: Convert QPointF to QPoint for move()
+        # Position window at screen center
         screen = QtWidgets.QApplication.primaryScreen().geometry()
         center_x = int(screen.center().x() - self.size // 2)
         center_y = int(screen.center().y() - self.size // 2)
@@ -64,7 +67,7 @@ class CrosshairCanvas(QtWidgets.QWidget):
         painter.end()
 
     def _draw_shape(self, painter, shape, size, center, is_outline):
-        """Centralized shape drawing method"""
+        print(f"Drawing shape: {shape} with size: {size} and center: {center}")
         # Convert center to float for consistent point handling
         center_f = float(center)
         size_f = float(size)
@@ -83,34 +86,40 @@ class CrosshairCanvas(QtWidgets.QWidget):
 
     def _draw_crosshair(self, painter, size, center, is_outline):
         """Draw crosshair with proper outline and main shape ordering"""
+        # Convert to float for precise drawing and ensure minimum size
+        center_f = float(center)
+        size_f = float(max(8, size))  # Ensure minimum size of 8
+        gap_f = float(min(self.gap, center - 1))  # Prevent gap from exceeding center
+        
         if is_outline:
-            # Draw outline using outline pen
             outline_pen = self._create_outline_pen()
             outline_pen.setCapStyle(Qt.RoundCap)
             outline_pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(outline_pen)
         else:
-            # Draw main shape using primary color pen
             pen = QtGui.QPen(QtGui.QColor(self.settings['color']), 
                             self.settings['thickness'])
             pen.setCapStyle(Qt.RoundCap)
             pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
 
-        # Convert to float for precise drawing
-        center_f = float(center)
-        size_f = float(size)
-        gap_f = float(self.gap)
+        # Draw the crosshair lines with size checks
+        if size_f >= 8:  # Only draw if we have minimum size
+            # Vertical lines
+            painter.drawLine(QPointF(center_f, 0), 
+                            QPointF(center_f, center_f - gap_f))
+            painter.drawLine(QPointF(center_f, center_f + gap_f), 
+                            QPointF(center_f, size_f))
+            
+            # Horizontal lines
+            painter.drawLine(QPointF(0, center_f), 
+                            QPointF(center_f - gap_f, center_f))
+            painter.drawLine(QPointF(center_f + gap_f, center_f), 
+                            QPointF(size_f, center_f))
 
-        # Draw the crosshair lines
-        painter.drawLine(QPointF(center_f, 0), 
-                        QPointF(center_f, center_f - gap_f))
-        painter.drawLine(QPointF(center_f, center_f + gap_f), 
-                        QPointF(center_f, size_f))
-        painter.drawLine(QPointF(0, center_f), 
-                        QPointF(center_f - gap_f, center_f))
-        painter.drawLine(QPointF(center_f + gap_f, center_f), 
-                        QPointF(size_f, center_f))
+            # Draw center dot for small sizes
+            if size_f <= 12 and not is_outline:
+                painter.drawPoint(QPointF(center_f, center_f))
 
     def _draw_circle(self, painter, size, center, is_outline):
         """Draw a circle with consistent smooth edges for both outline and main shape"""
@@ -204,19 +213,58 @@ class CrosshairCanvas(QtWidgets.QWidget):
                 )
 
     def _draw_x_shape(self, painter, size, center, is_outline):
-        line_length = size // 3
-        
+        """Draw a perfectly centered and symmetrical X-shape"""
+        # Convert values to float for precise calculations
+        center_f = float(center)
+        size_f = float(size)
+        gap_f = float(self.gap)
+        line_length = size // 4  # Reduce length for better proportions
+        dot_size = max(2, size // 16)
+
         if is_outline:
-            painter.setPen(self._create_outline_pen())
+            pen = self._create_outline_pen()
+        else:
+            pen = QtGui.QPen(QtGui.QColor(self.settings['color']), 
+                            self.settings['thickness'])
         
-        painter.drawLine(QPointF(0, 0),
-                        QPointF(center - self.gap, center - self.gap))
-        painter.drawLine(QPointF(center + self.gap, center + self.gap),
-                        QPointF(size, size))
-        painter.drawLine(QPointF(size, 0),
-                        QPointF(center + self.gap, center - self.gap))
-        painter.drawLine(QPointF(center - self.gap, center + self.gap),
-                        QPointF(0, size))
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+
+        # Draw the X lines with proper gap consideration
+        # Calculate diagonal offset
+        offset = line_length / 1.414  # 1.414 is approximately √2
+
+        # Top-left to center
+        painter.drawLine(
+            QPointF(center_f - offset, center_f - offset),
+            QPointF(center_f - gap_f/1.414, center_f - gap_f/1.414)
+        )
+        # Center to bottom-right
+        painter.drawLine(
+            QPointF(center_f + gap_f/1.414, center_f + gap_f/1.414),
+            QPointF(center_f + offset, center_f + offset)
+        )
+        # Top-right to center
+        painter.drawLine(
+            QPointF(center_f + offset, center_f - offset),
+            QPointF(center_f + gap_f/1.414, center_f - gap_f/1.414)
+        )
+        # Center to bottom-left
+        painter.drawLine(
+            QPointF(center_f - gap_f/1.414, center_f + gap_f/1.414),
+            QPointF(center_f - offset, center_f + offset)
+        )
+
+        # Draw center dot if not outline
+        if not is_outline:
+            if self.settings['thickness'] == 1:
+                painter.drawPoint(QPointF(center_f, center_f))
+            else:
+                painter.drawEllipse(
+                    QPointF(center_f, center_f),
+                    dot_size/2, dot_size/2
+                )
 
     def _draw_diamond(self, painter, size, center, is_outline):
         """Draw a perfectly centered and symmetrical diamond shape"""
@@ -394,6 +442,17 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
         shape_layout.addWidget(QtWidgets.QLabel("Size:"))
         shape_layout.addWidget(self.size_spin)
         
+        # Move thickness and gap settings to basic tab
+        self.thickness_spin.setRange(1, 10)
+        self.thickness_spin.setValue(self.settings.get('thickness', 1))
+        shape_layout.addWidget(QtWidgets.QLabel("Line Thickness:"))
+        shape_layout.addWidget(self.thickness_spin)
+        
+        self.gap_spin.setRange(0, 20)
+        self.gap_spin.setValue(self.settings.get('gap', 0))
+        shape_layout.addWidget(QtWidgets.QLabel("Center Gap:"))
+        shape_layout.addWidget(self.gap_spin)
+        
         shape_group.setLayout(shape_layout)
         basic_layout.addWidget(shape_group)
         
@@ -422,16 +481,7 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
         advanced_tab = QtWidgets.QWidget()
         advanced_layout = QtWidgets.QVBoxLayout()
         
-        self.gap_spin.setRange(0, 20)
-        self.gap_spin.setValue(self.settings.get('gap', 0))
-        advanced_layout.addWidget(QtWidgets.QLabel("Center Gap:"))
-        advanced_layout.addWidget(self.gap_spin)
-        
-        self.thickness_spin.setRange(1, 10)
-        self.thickness_spin.setValue(self.settings.get('thickness', 1))
-        advanced_layout.addWidget(QtWidgets.QLabel("Line Thickness:"))
-        advanced_layout.addWidget(self.thickness_spin)
-        
+        # Remove thickness and gap settings from advanced tab
         self.opacity_slider.setRange(10, 100)
         self.opacity_slider.setValue(int(self.settings.get('opacity', 100)))
         advanced_layout.addWidget(QtWidgets.QLabel("Opacity:"))
@@ -575,10 +625,11 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
 
     def updateCrosshair(self):
         try:
+            # Update settings from UI controls
             self.settings.update({
                 'monitor_index': self.monitor_combo.currentIndex(),
                 'resolution': self.resolution_combo.currentText(),
-                'shape': self.shape_combo.currentText(),
+                'shape': self.shape_combo.currentText(),  # Make sure this is being set correctly
                 'size': self.size_spin.value() // 2 * 2,
                 'thickness': self.thickness_spin.value(),
                 'gap': self.gap_spin.value(),
@@ -591,22 +642,27 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
                 'outline_thickness': self.outline_thickness_spin.value()
             })
 
-            # Close existing crosshair
+            # Close existing crosshair if it exists
             if hasattr(self, 'crosshair') and self.crosshair:
                 self.crosshair.close()
 
-            # Create and show new crosshair
+            # Create new crosshair with updated settings
             self.crosshair = CrosshairCanvas(self.settings)
+            
+            # Set window opacity
             self.crosshair.setWindowOpacity(self.settings['opacity'] / 100)
             
-            # Fix: Ensure integer coordinates for move()
+            # Position the crosshair
             screen = QtWidgets.QApplication.screens()[self.settings['monitor_index']]
             geometry = screen.geometry()
             x = int(geometry.x() + (geometry.width() - self.settings['size']) // 2)
             y = int(geometry.y() + (geometry.height() - self.settings['size']) // 2)
             self.crosshair.move(x, y)
             
+            # Show the crosshair
             self.crosshair.show()
+            
+            # Save settings
             self.saveSettings()
             
         except Exception as e:
@@ -696,13 +752,49 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication([])
+    
+    # Set up icon path - look in same directory as script first
     icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icons', 'crossgen.ico')
+    
+    # Fallback paths if main path doesn't exist
+    fallback_paths = [
+        os.path.join(os.getcwd(), 'icons', 'crossgen.ico'),
+        os.path.join(os.getcwd(), 'crossgen.ico')
+    ]
+    
+    # Try main path first, then fallbacks
     if os.path.exists(icon_path):
         app_icon = QtGui.QIcon(icon_path)
-        app.setWindowIcon(app_icon)
-        # Also set for the window itself
-        ex = AdvancedSettingsWindow()
-        ex.setWindowIcon(app_icon)
     else:
-        print(f"Icon file not found at: {icon_path}")
+        # Try fallback paths
+        for path in fallback_paths:
+            if os.path.exists(path):
+                icon_path = path
+                app_icon = QtGui.QIcon(path)
+                break
+        else:
+            print("Warning: Icon file not found in any location")
+            app_icon = None
+    
+    # Apply icon if we found one
+    if app_icon:
+        # Set application icon (shows in taskbar)
+        app.setWindowIcon(app_icon)
+        
+        # Create and show main window
+        ex = AdvancedSettingsWindow()
+        
+        # Set window-specific icon (shows in titlebar)
+        ex.setWindowIcon(app_icon)
+        
+        # Optional: Set taskbar icon for Windows
+        try:
+            import ctypes
+            myappid = 'crossgen.1.3.0'  # arbitrary string
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except:
+            pass
+    else:
+        ex = AdvancedSettingsWindow()
+    
     app.exec_()
