@@ -1,97 +1,115 @@
 from PyQt5 import QtWidgets, QtGui, QtCore
-from PyQt5.QtCore import Qt, QSettings, QPoint
+from PyQt5.QtCore import Qt, QSettings, QPoint, QPointF
 from PyQt5.QtWidgets import QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
 import json
 import os
 
+class CrosshairColors:
+    PRIMARY = 'red'
+    OUTLINE = 'black'
+
 class CrosshairCanvas(QtWidgets.QWidget):
     def __init__(self, settings):
         super().__init__()
-        self.settings = settings
+        self.settings = settings.copy()  # Create a copy of settings
         self.initUI()
+        self.gap = self.settings.get('gap', 0)  # Ensure gap is initialized
 
     def initUI(self):
-        even_size = self.settings['size'] // 2 * 2  # Ensure even size
-        self.setFixedSize(even_size, even_size)
+        # Calculate even size
+        self.size = self.settings['size'] if self.settings['size'] % 2 == 0 else self.settings['size'] + 1
+        self.center = self.size // 2
+        self.gap = self.settings.get('gap', 0)
+        
+        # Set window properties
+        self.setFixedSize(self.size, self.size)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMouseTracking(False)  # Make it non-interactable
+        self.setMouseTracking(False)
 
+        # Fix: Convert QPointF to QPoint for move()
         screen = QtWidgets.QApplication.primaryScreen().geometry()
-        center_pos = QPoint(screen.center().x() - even_size // 2, screen.center().y() - even_size // 2)
-        self.move(center_pos)
-        self.show()
+        center_x = int(screen.center().x() - self.size // 2)
+        center_y = int(screen.center().y() - self.size // 2)
+        self.move(center_x, center_y)
+
+    def _create_outline_pen(self):
+        pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']),
+                        self.settings['thickness'] + 2)
+        pen.setCapStyle(Qt.FlatCap)
+        return pen
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
-        # Only enable anti-aliasing for thicker lines or non-Crosshair shapes
-        if self.settings['thickness'] > 1 or self.settings['shape'] != 'Crosshair':
-            painter.setRenderHint(QtGui.QPainter.Antialiasing)
-        self.drawCrosshair(painter)
-
-    def drawCrosshair(self, painter):
-        size = self.settings['size'] if self.settings['size'] % 2 == 0 else self.settings['size'] + 1
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, False)
+        
+        # Get current shape and settings
+        shape = self.settings.get('shape', 'Crosshair')
+        size = self.settings['size']
         center = size // 2
-        shape = self.settings['shape']
-
+        
+        # Draw outline if enabled
         if self.settings.get('outline_enabled', False):
             outline_pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']), 
-                                    self.settings['thickness'] + 2)
+                                   self.settings['thickness'] + 2)
             outline_pen.setCapStyle(Qt.FlatCap)
             painter.setPen(outline_pen)
-            self.drawShape(painter, shape, size, center, True)
+            self._draw_shape(painter, shape, size, center, True)
 
         # Draw primary shape
-        pen = QtGui.QPen(QtGui.QColor(self.settings['color']), self.settings['thickness'])
-        if self.settings['thickness'] == 1:
-            pen.setCosmetic(True)
-            painter.setRenderHint(QtGui.QPainter.Antialiasing, False)
+        pen = QtGui.QPen(QtGui.QColor(self.settings['color']), 
+                        self.settings['thickness'])
         pen.setCapStyle(Qt.FlatCap)
         painter.setPen(pen)
-        self.drawShape(painter, shape, size, center, False)
+        self._draw_shape(painter, shape, size, center, False)
+        
+        painter.end()
 
-    def drawShape(self, painter, shape, size, center, is_outline):
-        gap = self.settings.get('gap', 0)
+    def _draw_shape(self, painter, shape, size, center, is_outline):
+        """Centralized shape drawing method"""
+        # Convert center to float for consistent point handling
+        center_f = float(center)
+        size_f = float(size)
+        gap_f = float(self.gap)
         
         if shape == 'Crosshair':
-            # Draw outline if enabled
-            if self.settings.get('outline_enabled', False):
-                outline_pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']), 
-                                        self.settings['thickness'] + 2)
-                outline_pen.setCapStyle(Qt.FlatCap)  # Use flat caps for consistent appearance
-                painter.setPen(outline_pen)
-                
-                # Draw outline covering full length including edges
-                painter.drawLine(QPoint(center, 0), QPoint(center, center - gap))  # Top half
-                painter.drawLine(QPoint(center, center + gap), QPoint(center, size))  # Bottom half
-                painter.drawLine(QPoint(0, center), QPoint(center - gap, center))  # Left half
-                painter.drawLine(QPoint(center + gap, center), QPoint(size, center))  # Right half
-
-            # Draw primary shape
-            pen = QtGui.QPen(QtGui.QColor(self.settings['color']), self.settings['thickness'])
-            if self.settings['thickness'] == 1:
-                pen.setCosmetic(True)
-                painter.setRenderHint(QtGui.QPainter.Antialiasing, False)
-            pen.setCapStyle(Qt.FlatCap)  # Use flat caps for the main crosshair
-            painter.setPen(pen)
-
-            # Draw main crosshair with same coordinates as outline
-            painter.drawLine(QPoint(center, 0), QPoint(center, center - gap))  # Top half
-            painter.drawLine(QPoint(center, center + gap), QPoint(center, size))  # Bottom half
-            painter.drawLine(QPoint(0, center), QPoint(center - gap, center))  # Left half
-            painter.drawLine(QPoint(center + gap, center), QPoint(size, center))  # Right half
-        elif shape == 'Circle':  # Changed from 'Round' to 'Circle'
-            fill_style = self.settings.get('fill_style', 'Ring')
+            # Vertical lines
+            painter.drawLine(QPointF(center_f, 0), 
+                           QPointF(center_f, center_f - gap_f))
+            painter.drawLine(QPointF(center_f, center_f + gap_f), 
+                           QPointF(center_f, size_f))
+            # Horizontal lines
+            painter.drawLine(QPointF(0, center_f), 
+                           QPointF(center_f - gap_f, center_f))
+            painter.drawLine(QPointF(center_f + gap_f, center_f), 
+                           QPointF(size_f, center_f))
             
-            # Draw outline if enabled
-            if self.settings.get('outline_enabled', False):
-                outline_pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']), 
-                                        self.settings['thickness'] + 2)
-                painter.setPen(outline_pen)
-                painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(0, 0, size - 1, size - 1)
+        elif shape == 'Circle':
+            self._draw_circle(painter, size, center, is_outline)
+        elif shape == 'T-Shape':
+            self._draw_t_shape(painter, size, center, is_outline)
+        elif shape == 'X-Shape':
+            self._draw_x_shape(painter, size, center, is_outline)
+        elif shape == 'Diamond':
+            self._draw_diamond(painter, size, center, is_outline)
 
-            # Draw primary shape
+    def _draw_crosshair(self, painter, size, center, is_outline):
+        if is_outline:
+            painter.setPen(self._create_outline_pen())
+            
+        painter.drawLine(QPointF(center, 0), QPointF(center, center - self.gap))
+        painter.drawLine(QPointF(center, center + self.gap), QPointF(center, size))
+        painter.drawLine(QPointF(0, center), QPointF(center - self.gap, center))
+        painter.drawLine(QPointF(center + self.gap, center), QPointF(size, center))
+
+    def _draw_circle(self, painter, size, center, is_outline):
+        fill_style = self.settings.get('fill_style', 'Ring')
+        
+        if is_outline:
+            painter.setPen(self._create_outline_pen())
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(0, 0, size - 1, size - 1)
+        else:
             pen = QtGui.QPen(QtGui.QColor(self.settings['color']), self.settings['thickness'])
             painter.setPen(pen)
             
@@ -102,127 +120,82 @@ class CrosshairCanvas(QtWidgets.QWidget):
                 painter.setBrush(Qt.NoBrush)
             
             painter.drawEllipse(0, 0, size - 1, size - 1)
-        elif shape == 'T-Shape':
-            # Calculate proportional sizes
-            gap = self.settings.get('gap', 4)
-            dot_size = max(2, size // 16)
-            line_length = size // 3
 
-            if self.settings.get('outline_enabled', False) and is_outline:
-                # Set outline pen
-                outline_pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']), 
-                                        self.settings['thickness'] + 2)
-                outline_pen.setCapStyle(Qt.FlatCap)
-                painter.setPen(outline_pen)
-            
-            # Draw horizontal lines (arms) with gap from center
-            painter.drawLine(  # Left arm
-                QPoint(center - gap - line_length, center),
-                QPoint(center - gap, center)
-            )
-            painter.drawLine(  # Right arm
-                QPoint(center + gap, center),
-                QPoint(center + gap + line_length, center)
-            )
-            
-            # Draw vertical line below center
-            painter.drawLine(
-                QPoint(center, center + gap),
-                QPoint(center, center + gap + line_length)
-            )
-            
-            # Draw center dot (only for main shape, not outline)
-            if not is_outline:
-                if self.settings['thickness'] == 1:
-                    painter.drawPoint(QPoint(center, center))
-                else:
-                    painter.drawEllipse(
-                        center - dot_size//2,
-                        center - dot_size//2,
-                        dot_size,
-                        dot_size
-                    )
-        elif shape == 'X-Shape':
-            # Calculate gap and line lengths
-            gap = self.settings.get('gap', 4)
-            line_length = size // 3  # Proportional line length
-            
-            if self.settings.get('outline_enabled', False) and is_outline:
-                # Set outline pen
-                outline_pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']), 
-                                        self.settings['thickness'] + 2)
-                outline_pen.setCapStyle(Qt.FlatCap)
-                painter.setPen(outline_pen)
-            
-            # Draw diagonal lines with gap
-            # Top-left to bottom-right line
-            painter.drawLine(  # Upper segment
-                QPoint(0, 0),
-                QPoint(center - gap, center - gap)
-            )
-            painter.drawLine(  # Lower segment
-                QPoint(center + gap, center + gap),
-                QPoint(size, size)
-            )
-            
-            # Top-right to bottom-left line
-            painter.drawLine(  # Upper segment
-                QPoint(size, 0),
-                QPoint(center + gap, center - gap)
-            )
-            painter.drawLine(  # Lower segment
-                QPoint(center - gap, center + gap),
-                QPoint(0, size)
-            )
-        elif shape == 'Diamond':
-            # Calculate proportional sizes
-            gap = self.settings.get('gap', 4)
-            dot_size = max(2, size // 16)
-            line_length = size // 3
+    def _draw_t_shape(self, painter, size, center, is_outline):
+        dot_size = max(2, size // 16)
+        line_length = size // 3
 
-            # Set outline pen if enabled
-            if self.settings.get('outline_enabled', False) and is_outline:
-                outline_pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']), 
-                                        self.settings['thickness'] + 2)
-                outline_pen.setCapStyle(Qt.FlatCap)
-                painter.setPen(outline_pen)
+        if is_outline:
+            painter.setPen(self._create_outline_pen())
+        
+        painter.drawLine(QPointF(center - self.gap - line_length, center),
+                        QPointF(center - self.gap, center))
+        painter.drawLine(QPointF(center + self.gap, center),
+                        QPointF(center + self.gap + line_length, center))
+        painter.drawLine(QPointF(center, center + self.gap),
+                        QPointF(center, center + self.gap + line_length))
+        
+        if not is_outline:
+            if self.settings['thickness'] == 1:
+                painter.drawPoint(QPointF(center, center))
             else:
-                # Set primary color pen
-                pen = QtGui.QPen(QtGui.QColor(self.settings['color']), self.settings['thickness'])
-                pen.setCapStyle(Qt.FlatCap)
-                painter.setPen(pen)
+                painter.drawEllipse(center - dot_size//2,
+                                  center - dot_size//2,
+                                  dot_size,
+                                  dot_size)
 
-            # Calculate diamond points with gap
-            points = [
-                QPoint(center, center - gap - line_length),  # Top
-                QPoint(center + gap + line_length, center),  # Right
-                QPoint(center, center + gap + line_length),  # Bottom
-                QPoint(center - gap - line_length, center)   # Left
-            ]
+    def _draw_x_shape(self, painter, size, center, is_outline):
+        line_length = size // 3
+        
+        if is_outline:
+            painter.setPen(self._create_outline_pen())
+        
+        painter.drawLine(QPointF(0, 0),
+                        QPointF(center - self.gap, center - self.gap))
+        painter.drawLine(QPointF(center + self.gap, center + self.gap),
+                        QPointF(size, size))
+        painter.drawLine(QPointF(size, 0),
+                        QPointF(center + self.gap, center - self.gap))
+        painter.drawLine(QPointF(center - self.gap, center + self.gap),
+                        QPointF(0, size))
 
-            # Draw four separate lines to create the diamond outline
-            painter.drawLine(points[0], points[1])  # Top-right
-            painter.drawLine(points[1], points[2])  # Right-bottom
-            painter.drawLine(points[2], points[3])  # Bottom-left
-            painter.drawLine(points[3], points[0])  # Left-top
+    def _draw_diamond(self, painter, size, center, is_outline):
+        dot_size = max(2, size // 16)
+        line_length = size // 3
 
-            # Draw center dot (only for main shape, not outline)
-            if not is_outline:
-                if self.settings['thickness'] == 1:
-                    painter.drawPoint(QPoint(center, center))
-                else:
-                    painter.drawEllipse(
-                        center - dot_size//2,
-                        center - dot_size//2,
-                        dot_size,
-                        dot_size
-                    )
-        elif shape == 'Dot Matrix':
-            spacing = self.settings.get('dot_spacing', 4)
-            for x in range(0, size, spacing):
-                for y in range(0, size, spacing):
-                    painter.drawPoint(x, y)
+        if is_outline:
+            painter.setPen(self._create_outline_pen())
+
+        points = [
+            QPointF(center, center - self.gap - line_length),
+            QPointF(center + self.gap + line_length, center),
+            QPointF(center, center + self.gap + line_length),
+            QPointF(center - self.gap - line_length, center)
+        ]
+
+        painter.drawLine(points[0], points[1])
+        painter.drawLine(points[1], points[2])
+        painter.drawLine(points[2], points[3])
+        painter.drawLine(points[3], points[0])
+
+        if not is_outline:
+            if self.settings['thickness'] == 1:
+                painter.drawPoint(QPointF(center, center))
+            else:
+                painter.drawEllipse(center - dot_size//2,
+                                  center - dot_size//2,
+                                  dot_size,
+                                  dot_size)
+
+    def _draw_dot_matrix(self, painter, size, center, is_outline):
+        spacing = self.settings.get('dot_spacing', 4)
+        for x in range(0, size, spacing):
+            for y in range(0, size, spacing):
+                painter.drawPoint(QPointF(x, y))
                     
+    def drawShape(self, painter, shape, size, center, is_outline):
+        # This is now an alias for _draw_shape for backward compatibility
+        self._draw_shape(painter, shape, size, center, is_outline)
 
 class SettingsManager:
     def __init__(self):
@@ -511,63 +484,43 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
 
     def updateCrosshair(self):
         try:
-            # Update settings
+            # Update settings with current values
             self.settings.update({
                 'monitor_index': self.monitor_combo.currentIndex(),
                 'resolution': self.resolution_combo.currentText(),
                 'shape': self.shape_combo.currentText(),
-                'size': self.size_spin.value() // 2 * 2,  # Force even number
+                'size': self.size_spin.value() // 2 * 2,
                 'thickness': self.thickness_spin.value(),
                 'gap': self.gap_spin.value(),
                 'opacity': self.opacity_slider.value(),
                 'outline_enabled': self.outline_check.isChecked(),
-                'fill_style': self.fill_style_combo.currentText()
+                'fill_style': self.fill_style_combo.currentText(),
+                'color': self.settings.get('color', '#FF0000'),
+                'outline_color': self.settings.get('outline_color', '#000000')
             })
 
             # Close existing crosshair
-            if self.crosshair:
+            if hasattr(self, 'crosshair') and self.crosshair:
                 self.crosshair.close()
 
-            # Get selected monitor and resolution
-            monitor_index = self.settings['monitor_index']
-            resolution_text = self.settings['resolution']
-            
-            # Simplified resolution handling
-            if "Custom..." in resolution_text:
-                if 'custom_resolution' in self.settings and self.settings['custom_resolution']:
-                    width, height = self.settings['custom_resolution']
-                else:
-                    dialog = CustomResolutionDialog(self)
-                    if dialog.exec_() == QDialog.Accepted:
-                        try:
-                            width = int(dialog.width_input.text())
-                            height = int(dialog.height_input.text())
-                            self.settings['custom_resolution'] = (width, height)
-                        except ValueError:
-                            raise ValueError("Invalid custom resolution values")
-                    else:
-                        # User cancelled, use native resolution
-                        geometry = self.monitors[monitor_index]['geometry']
-                        width, height = geometry.width(), geometry.height()
-            else:
-                # Native resolution
-                geometry = self.monitors[monitor_index]['geometry']
-                width, height = geometry.width(), geometry.height()
-
-            # Move crosshair to selected monitor
-            screen = QtWidgets.QApplication.screens()[monitor_index]
-            screen_geometry = screen.geometry()
-            
+            # Create and show new crosshair
             self.crosshair = CrosshairCanvas(self.settings)
-            center_x = screen_geometry.x() + (screen_geometry.width() - self.settings['size']) // 2
-            center_y = screen_geometry.y() + (screen_geometry.height() - self.settings['size']) // 2
-            self.crosshair.move(center_x, center_y)
             self.crosshair.setWindowOpacity(self.settings['opacity'] / 100)
-
-            # Save settings
+            
+            # Fix: Ensure integer coordinates for move()
+            screen = QtWidgets.QApplication.screens()[self.settings['monitor_index']]
+            geometry = screen.geometry()
+            x = int(geometry.x() + (geometry.width() - self.settings['size']) // 2)
+            y = int(geometry.y() + (geometry.height() - self.settings['size']) // 2)
+            self.crosshair.move(x, y)
+            
+            self.crosshair.show()
             self.saveSettings()
+            
         except Exception as e:
-            QtWidgets.QMessageBox.warning(self, 'Error', f'Failed to update crosshair: {str(e)}')
+            import traceback
+            error_msg = f'Failed to update crosshair: {str(e)}\n{traceback.format_exc()}'
+            QtWidgets.QMessageBox.warning(self, 'Error', error_msg)
 
     def savePreset(self):
         name, ok = QtWidgets.QInputDialog.getText(self, 'Save Preset', 'Enter preset name:')
