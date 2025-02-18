@@ -34,32 +34,30 @@ class CrosshairCanvas(QtWidgets.QWidget):
         self.move(center_x, center_y)
 
     def _create_outline_pen(self):
-        pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']),
-                        self.settings['thickness'] + 2)
+        pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']))
+        # Use outline_thickness setting instead of fixed increment
+        pen.setWidth(self.settings['thickness'] + self.settings.get('outline_thickness', 1))
         pen.setCapStyle(Qt.FlatCap)
         return pen
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.Antialiasing, False)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
         
-        # Get current shape and settings
         shape = self.settings.get('shape', 'Crosshair')
         size = self.settings['size']
         center = size // 2
         
-        # Draw outline if enabled
+        # Draw outline first if enabled
         if self.settings.get('outline_enabled', False):
-            outline_pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']), 
-                                   self.settings['thickness'] + 2)
-            outline_pen.setCapStyle(Qt.FlatCap)
-            painter.setPen(outline_pen)
+            painter.setOpacity(self.settings.get('outline_opacity', 100) / 100)
             self._draw_shape(painter, shape, size, center, True)
 
-        # Draw primary shape
+        # Then draw main shape
+        painter.setOpacity(self.settings.get('opacity', 100) / 100)
         pen = QtGui.QPen(QtGui.QColor(self.settings['color']), 
                         self.settings['thickness'])
-        pen.setCapStyle(Qt.FlatCap)
+        pen.setCapStyle(Qt.RoundCap)
         painter.setPen(pen)
         self._draw_shape(painter, shape, size, center, False)
         
@@ -73,17 +71,7 @@ class CrosshairCanvas(QtWidgets.QWidget):
         gap_f = float(self.gap)
         
         if shape == 'Crosshair':
-            # Vertical lines
-            painter.drawLine(QPointF(center_f, 0), 
-                           QPointF(center_f, center_f - gap_f))
-            painter.drawLine(QPointF(center_f, center_f + gap_f), 
-                           QPointF(center_f, size_f))
-            # Horizontal lines
-            painter.drawLine(QPointF(0, center_f), 
-                           QPointF(center_f - gap_f, center_f))
-            painter.drawLine(QPointF(center_f + gap_f, center_f), 
-                           QPointF(size_f, center_f))
-            
+            self._draw_crosshair(painter, size, center, is_outline)
         elif shape == 'Circle':
             self._draw_circle(painter, size, center, is_outline)
         elif shape == 'T-Shape':
@@ -94,55 +82,126 @@ class CrosshairCanvas(QtWidgets.QWidget):
             self._draw_diamond(painter, size, center, is_outline)
 
     def _draw_crosshair(self, painter, size, center, is_outline):
+        """Draw crosshair with proper outline and main shape ordering"""
         if is_outline:
-            painter.setPen(self._create_outline_pen())
-            
-        painter.drawLine(QPointF(center, 0), QPointF(center, center - self.gap))
-        painter.drawLine(QPointF(center, center + self.gap), QPointF(center, size))
-        painter.drawLine(QPointF(0, center), QPointF(center - self.gap, center))
-        painter.drawLine(QPointF(center + self.gap, center), QPointF(size, center))
+            # Draw outline using outline pen
+            outline_pen = self._create_outline_pen()
+            outline_pen.setCapStyle(Qt.RoundCap)
+            outline_pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(outline_pen)
+        else:
+            # Draw main shape using primary color pen
+            pen = QtGui.QPen(QtGui.QColor(self.settings['color']), 
+                            self.settings['thickness'])
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+
+        # Convert to float for precise drawing
+        center_f = float(center)
+        size_f = float(size)
+        gap_f = float(self.gap)
+
+        # Draw the crosshair lines
+        painter.drawLine(QPointF(center_f, 0), 
+                        QPointF(center_f, center_f - gap_f))
+        painter.drawLine(QPointF(center_f, center_f + gap_f), 
+                        QPointF(center_f, size_f))
+        painter.drawLine(QPointF(0, center_f), 
+                        QPointF(center_f - gap_f, center_f))
+        painter.drawLine(QPointF(center_f + gap_f, center_f), 
+                        QPointF(size_f, center_f))
 
     def _draw_circle(self, painter, size, center, is_outline):
-        fill_style = self.settings.get('fill_style', 'Ring')
+        """Draw a circle with consistent smooth edges for both outline and main shape"""
+        # Force high quality rendering for circles
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        painter.setRenderHint(QtGui.QPainter.HighQualityAntialiasing, True)
+        painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform, True)
+        
+        # Calculate exact center and radius using floating point
+        center_point = QPointF(size/2, size/2)
+        radius = (size-2)/2  # Base radius
         
         if is_outline:
-            painter.setPen(self._create_outline_pen())
+            # Set up outline pen with smooth edges
+            outline_pen = QtGui.QPen(QtGui.QColor(self.settings['outline_color']))
+            outline_thickness = self.settings.get('outline_thickness', 1)
+            outline_pen.setWidth(outline_thickness)
+            outline_pen.setCapStyle(Qt.RoundCap)
+            outline_pen.setJoinStyle(Qt.RoundJoin)
+            
+            # Draw two circles for outline effect
+            painter.setPen(outline_pen)
             painter.setBrush(Qt.NoBrush)
-            painter.drawEllipse(0, 0, size - 1, size - 1)
+            
+            # Outer circle
+            painter.drawEllipse(center_point, 
+                              radius + outline_thickness/2,
+                              radius + outline_thickness/2)
+            
         else:
-            pen = QtGui.QPen(QtGui.QColor(self.settings['color']), self.settings['thickness'])
+            # Set up main shape pen
+            pen = QtGui.QPen(QtGui.QColor(self.settings['color']), 
+                            self.settings['thickness'])
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
             painter.setPen(pen)
             
-            if fill_style == 'Full':
+            # Handle fill style
+            fill_style = self.settings.get('fill_style', 'Ring')
+            if (fill_style == 'Full'):
                 brush = QtGui.QBrush(QtGui.QColor(self.settings['color']))
                 painter.setBrush(brush)
             else:
                 painter.setBrush(Qt.NoBrush)
             
-            painter.drawEllipse(0, 0, size - 1, size - 1)
+            # Draw main circle
+            painter.drawEllipse(center_point, radius, radius)
 
     def _draw_t_shape(self, painter, size, center, is_outline):
-        dot_size = max(2, size // 16)
+        """Draw a perfectly centered and symmetrical T-shape"""
+        # Convert to float for precise calculations
+        center_f = float(center)
+        size_f = float(size)
+        gap_f = float(self.gap)
         line_length = size // 3
+        dot_size = max(2, size // 16)
 
         if is_outline:
             painter.setPen(self._create_outline_pen())
+        else:
+            pen = QtGui.QPen(QtGui.QColor(self.settings['color']), 
+                            self.settings['thickness'])
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
+
+        # Draw horizontal line of T
+        painter.drawLine(
+            QPointF(center_f - gap_f - line_length, center_f),
+            QPointF(center_f - gap_f, center_f)
+        )
+        painter.drawLine(
+            QPointF(center_f + gap_f, center_f),
+            QPointF(center_f + gap_f + line_length, center_f)
+        )
         
-        painter.drawLine(QPointF(center - self.gap - line_length, center),
-                        QPointF(center - self.gap, center))
-        painter.drawLine(QPointF(center + self.gap, center),
-                        QPointF(center + self.gap + line_length, center))
-        painter.drawLine(QPointF(center, center + self.gap),
-                        QPointF(center, center + self.gap + line_length))
-        
+        # Draw vertical line of T
+        painter.drawLine(
+            QPointF(center_f, center_f + gap_f),
+            QPointF(center_f, center_f + gap_f + line_length)
+        )
+
+        # Draw center dot if not outline
         if not is_outline:
             if self.settings['thickness'] == 1:
-                painter.drawPoint(QPointF(center, center))
+                painter.drawPoint(QPointF(center_f, center_f))
             else:
-                painter.drawEllipse(center - dot_size//2,
-                                  center - dot_size//2,
-                                  dot_size,
-                                  dot_size)
+                painter.drawEllipse(
+                    QPointF(center_f, center_f),
+                    dot_size/2, dot_size/2
+                )
 
     def _draw_x_shape(self, painter, size, center, is_outline):
         line_length = size // 3
@@ -160,32 +219,48 @@ class CrosshairCanvas(QtWidgets.QWidget):
                         QPointF(0, size))
 
     def _draw_diamond(self, painter, size, center, is_outline):
+        """Draw a perfectly centered and symmetrical diamond shape"""
+        # Convert values to float for precise calculations
+        center_f = float(center)
+        size_f = float(size)
+        gap_f = float(self.gap)
+        line_length = size // 3  # Scale based on size
         dot_size = max(2, size // 16)
-        line_length = size // 3
 
         if is_outline:
             painter.setPen(self._create_outline_pen())
+        else:
+            pen = QtGui.QPen(QtGui.QColor(self.settings['color']), 
+                            self.settings['thickness'])
+            pen.setCapStyle(Qt.RoundCap)
+            pen.setJoinStyle(Qt.RoundJoin)
+            painter.setPen(pen)
 
+        # Calculate diamond points with perfect symmetry
         points = [
-            QPointF(center, center - self.gap - line_length),
-            QPointF(center + self.gap + line_length, center),
-            QPointF(center, center + self.gap + line_length),
-            QPointF(center - self.gap - line_length, center)
+            QPointF(center_f, center_f - (gap_f + line_length)),  # Top
+            QPointF(center_f + (gap_f + line_length), center_f),  # Right
+            QPointF(center_f, center_f + (gap_f + line_length)),  # Bottom
+            QPointF(center_f - (gap_f + line_length), center_f)   # Left
         ]
 
-        painter.drawLine(points[0], points[1])
-        painter.drawLine(points[1], points[2])
-        painter.drawLine(points[2], points[3])
-        painter.drawLine(points[3], points[0])
+        # Draw diamond shape
+        path = QtGui.QPainterPath()
+        path.moveTo(points[0])
+        for i in range(1, len(points)):
+            path.lineTo(points[i])
+        path.lineTo(points[0])  # Close the shape
+        painter.drawPath(path)
 
+        # Draw center dot if not outline
         if not is_outline:
             if self.settings['thickness'] == 1:
-                painter.drawPoint(QPointF(center, center))
+                painter.drawPoint(QPointF(center_f, center_f))
             else:
-                painter.drawEllipse(center - dot_size//2,
-                                  center - dot_size//2,
-                                  dot_size,
-                                  dot_size)
+                painter.drawEllipse(
+                    QPointF(center_f, center_f),
+                    dot_size/2, dot_size/2
+                )
 
     def _draw_dot_matrix(self, painter, size, center, is_outline):
         spacing = self.settings.get('dot_spacing', 4)
@@ -361,6 +436,20 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
         self.opacity_slider.setValue(int(self.settings.get('opacity', 100)))
         advanced_layout.addWidget(QtWidgets.QLabel("Opacity:"))
         advanced_layout.addWidget(self.opacity_slider)
+
+        self.outline_opacity_slider = QtWidgets.QSlider(Qt.Horizontal)
+        self.outline_opacity_slider.setRange(10, 100)
+        self.outline_opacity_slider.setValue(int(self.settings.get('outline_opacity', 100)))
+        self.outline_opacity_slider.valueChanged.connect(self.updateCrosshair)  # Add this line
+        advanced_layout.addWidget(QtWidgets.QLabel("Outline Opacity:"))
+        advanced_layout.addWidget(self.outline_opacity_slider)
+
+        self.outline_thickness_spin = QtWidgets.QSpinBox()
+        self.outline_thickness_spin.setRange(1, 3)
+        self.outline_thickness_spin.setValue(self.settings.get('outline_thickness', 1))
+        self.outline_thickness_spin.valueChanged.connect(self.updateCrosshair)
+        advanced_layout.addWidget(QtWidgets.QLabel("Outline Thickness:"))
+        advanced_layout.addWidget(self.outline_thickness_spin)
         
         # Move Monitor Settings to Advanced Tab
         monitor_group = QtWidgets.QGroupBox("Monitor Settings")
@@ -409,7 +498,7 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
-        self.setWindowTitle('Crossgen 1.2')
+        self.setWindowTitle('Crossgen 1.3')
         self.setFixedWidth(400)
         
         # Connect signals
@@ -432,13 +521,15 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
                 'thickness': 1,
                 'fill_style': 'Full',
                 'opacity': 100,
+                'outline_opacity': 100,
                 'outline_enabled': False,
                 'outline_color': '#000000',
                 'gap': 0,
                 'draggable': True,
                 'monitor_index': 0,
                 'resolution': 'Native',
-                'custom_resolution': None
+                'custom_resolution': None,
+                'outline_thickness': 1  # Add this line
             }
 
     def saveSettings(self):
@@ -484,7 +575,6 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
 
     def updateCrosshair(self):
         try:
-            # Update settings with current values
             self.settings.update({
                 'monitor_index': self.monitor_combo.currentIndex(),
                 'resolution': self.resolution_combo.currentText(),
@@ -493,10 +583,12 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
                 'thickness': self.thickness_spin.value(),
                 'gap': self.gap_spin.value(),
                 'opacity': self.opacity_slider.value(),
+                'outline_opacity': self.outline_opacity_slider.value(),
                 'outline_enabled': self.outline_check.isChecked(),
                 'fill_style': self.fill_style_combo.currentText(),
                 'color': self.settings.get('color', '#FF0000'),
-                'outline_color': self.settings.get('outline_color', '#000000')
+                'outline_color': self.settings.get('outline_color', '#000000'),
+                'outline_thickness': self.outline_thickness_spin.value()
             })
 
             # Close existing crosshair
