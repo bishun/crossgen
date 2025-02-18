@@ -24,6 +24,7 @@ brew install pyqt5
 
 ### Examples
 
-![new1](https://github.com/user-attachments/assets/7b2a5f5e-48e2-4ae0-8c90-40bb6da4ab57)
+![new1](https://github.com/user-attachments/assets/c9712ced-f438-4cec-89f0-0924cc904142)
 
-![new2](https://github.com/user-attachments/assets/f421e443-8d1d-40ce-b4cb-4cb3b5e9a96d)
+![new2](https://github.com/user-attachments/assets/2bfa1958-6aee-4da3-a643-c5b7f54e0f12)
+
