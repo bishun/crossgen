@@ -218,9 +218,14 @@ class CrosshairCanvas(QtWidgets.QWidget):
         center_f = float(center)
         size_f = float(size)
         gap_f = float(self.gap)
-        line_length = size // 4  # Reduce length for better proportions
-        dot_size = max(2, size // 16)
-
+        
+        # Calculate line length as 1/3 of size for better proportions
+        line_length = size_f / 3
+        
+        # Calculate diagonal offset for 45-degree lines
+        # Using math.sqrt(2)/2 ≈ 0.707 for precise 45-degree angle
+        diagonal_factor = 0.707
+        
         if is_outline:
             pen = self._create_outline_pen()
         else:
@@ -231,33 +236,41 @@ class CrosshairCanvas(QtWidgets.QWidget):
         pen.setJoinStyle(Qt.RoundJoin)
         painter.setPen(pen)
 
-        # Draw the X lines with proper gap consideration
-        # Calculate diagonal offset
-        offset = line_length / 1.414  # 1.414 is approximately √2
-
+        # Calculate gap offset for 45-degree lines
+        gap_offset = gap_f * diagonal_factor
+        
+        # Draw the four segments of the X with proper gap
         # Top-left to center
         painter.drawLine(
-            QPointF(center_f - offset, center_f - offset),
-            QPointF(center_f - gap_f/1.414, center_f - gap_f/1.414)
+            QPointF(center_f - line_length * diagonal_factor, 
+                    center_f - line_length * diagonal_factor),
+            QPointF(center_f - gap_offset, center_f - gap_offset)
         )
+        
         # Center to bottom-right
         painter.drawLine(
-            QPointF(center_f + gap_f/1.414, center_f + gap_f/1.414),
-            QPointF(center_f + offset, center_f + offset)
+            QPointF(center_f + gap_offset, center_f + gap_offset),
+            QPointF(center_f + line_length * diagonal_factor, 
+                    center_f + line_length * diagonal_factor)
         )
+        
         # Top-right to center
         painter.drawLine(
-            QPointF(center_f + offset, center_f - offset),
-            QPointF(center_f + gap_f/1.414, center_f - gap_f/1.414)
+            QPointF(center_f + line_length * diagonal_factor, 
+                    center_f - line_length * diagonal_factor),
+            QPointF(center_f + gap_offset, center_f - gap_offset)
         )
+        
         # Center to bottom-left
         painter.drawLine(
-            QPointF(center_f - gap_f/1.414, center_f + gap_f/1.414),
-            QPointF(center_f - offset, center_f + offset)
+            QPointF(center_f - gap_offset, center_f + gap_offset),
+            QPointF(center_f - line_length * diagonal_factor, 
+                    center_f + line_length * diagonal_factor)
         )
 
-        # Draw center dot if not outline
+        # Draw center dot if not outline and appropriate size/thickness
         if not is_outline:
+            dot_size = max(2, size // 16)  # Scale dot size with crosshair size
             if self.settings['thickness'] == 1:
                 painter.drawPoint(QPointF(center_f, center_f))
             else:
