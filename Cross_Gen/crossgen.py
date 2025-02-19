@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel
 import json
 import os
 import math
+from PyQt5.QtWidgets import QSystemTrayIcon, QMenu, QAction
 
 
 def get_app_icon() -> QtGui.QIcon:
@@ -30,6 +31,40 @@ def get_app_icon() -> QtGui.QIcon:
 
 # Named tuple to store dimension calculations
 Dimensions = namedtuple("Dimensions", ["size", "center", "gap", "size_f", "center_f", "gap_f", "dot_size"])
+
+class SystemTray(QSystemTrayIcon):
+    def __init__(self, icon, parent=None):
+        super().__init__(icon, parent)
+        self.setToolTip('CrossGen')
+        self.setup_menu()
+        self.activated.connect(self.on_tray_activated)
+        self.parent = parent
+
+    def setup_menu(self):
+        menu = QMenu()
+        restore_action = QAction("Restore", self)
+        exit_action = QAction("Exit", self)
+        
+        restore_action.triggered.connect(self.restore_window)
+        exit_action.triggered.connect(self.exit_app)
+        
+        menu.addAction(restore_action)
+        menu.addSeparator()
+        menu.addAction(exit_action)
+        
+        self.setContextMenu(menu)
+
+    def on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.DoubleClick:
+            self.restore_window()
+
+    def restore_window(self):
+        if self.parent:
+            self.parent.show()
+            self.parent.activateWindow()
+
+    def exit_app(self):
+        QtWidgets.QApplication.quit()
 
 class CrosshairCanvas(QtWidgets.QWidget):
     def __init__(self, settings):
@@ -86,16 +121,7 @@ class CrosshairCanvas(QtWidgets.QWidget):
         
         pen.setWidth(width)
         pen.setColor(QtGui.QColor(color))
-        
-        # Apply line style
-        line_style = self.settings.get('line_style', 'Solid')
-        if line_style == 'Dotted':
-            pen.setStyle(Qt.DotLine)
-        elif line_style == 'Dashed':
-            pen.setStyle(Qt.DashLine)
-        else:
-            pen.setStyle(Qt.SolidLine)
-        
+        pen.setStyle(Qt.SolidLine)
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         return pen
@@ -132,14 +158,26 @@ class CrosshairCanvas(QtWidgets.QWidget):
     def _draw_crosshair(self, painter, dims: Dimensions, is_outline: bool):
         pen = self.create_pen(is_outline, 'Crosshair')
         painter.setPen(pen)
-
-        # Draw vertical lines
-        painter.drawLine(QPointF(dims.center_f, 0), QPointF(dims.center_f, dims.center_f - dims.gap_f))
-        painter.drawLine(QPointF(dims.center_f, dims.center_f + dims.gap_f), QPointF(dims.center_f, dims.size_f))
-        # Draw horizontal lines
-        painter.drawLine(QPointF(0, dims.center_f), QPointF(dims.center_f - dims.gap_f, dims.center_f))
-        painter.drawLine(QPointF(dims.center_f + dims.gap_f, dims.center_f), QPointF(dims.size_f, dims.center_f))
-
+        
+        # Get angle from settings
+        angle = self.settings.get('crosshair_angle', 0)
+        
+        # Save current state
+        painter.save()
+        
+        # Translate to center and rotate
+        painter.translate(dims.center_f, dims.center_f)
+        painter.rotate(angle)
+        
+        # Draw lines
+        painter.drawLine(QPointF(0, -dims.size_f/2), QPointF(0, -dims.gap_f))  # Top
+        painter.drawLine(QPointF(0, dims.gap_f), QPointF(0, dims.size_f/2))    # Bottom
+        painter.drawLine(QPointF(-dims.size_f/2, 0), QPointF(-dims.gap_f, 0))  # Left
+        painter.drawLine(QPointF(dims.gap_f, 0), QPointF(dims.size_f/2, 0))    # Right
+        
+        # Restore painter state
+        painter.restore()
+        
         # Draw center dot if enabled and not drawing outline
         if not is_outline and self.settings.get('dot_enabled', True):
             dot_size = self.settings.get('dot_size', 2)
@@ -273,28 +311,43 @@ class CrosshairCanvas(QtWidgets.QWidget):
                 )
 
     def _draw_diamond(self, painter, dims: Dimensions, is_outline: bool):
-        line_length = dims.size // 3
-        dot_size = max(2, dims.size // 16)
         pen = self.create_pen(is_outline, 'Diamond')
         painter.setPen(pen)
-
+        
+        # Get angle from settings
+        angle = self.settings.get('crosshair_angle', 0)
+        
+        # Save current state
+        painter.save()
+        
+        # Translate to center and rotate
+        painter.translate(dims.center_f, dims.center_f)
+        painter.rotate(angle)
+        
         # Define diamond points with perfect symmetry
+        line_length = dims.size // 3
         points = [
-            QPointF(dims.center_f, dims.center_f - (dims.gap_f + line_length)),  # Top
-            QPointF(dims.center_f + (dims.gap_f + line_length), dims.center_f),  # Right
-            QPointF(dims.center_f, dims.center_f + (dims.gap_f + line_length)),  # Bottom
-            QPointF(dims.center_f - (dims.gap_f + line_length), dims.center_f)   # Left
+            QPointF(0, -(dims.gap_f + line_length)),  # Top
+            QPointF(dims.gap_f + line_length, 0),     # Right
+            QPointF(0, dims.gap_f + line_length),     # Bottom
+            QPointF(-(dims.gap_f + line_length), 0)   # Left
         ]
-
+        
+        # Draw rotated diamond
         path = QtGui.QPainterPath()
         path.moveTo(points[0])
         for pt in points[1:]:
             path.lineTo(pt)
         path.lineTo(points[0])
         painter.drawPath(path)
-
-        if not is_outline:
-            if self.settings['thickness'] == 1:
+        
+        # Restore painter state
+        painter.restore()
+        
+        # Draw center dot if needed
+        if not is_outline and self.settings.get('dot_enabled', True):
+            dot_size = self.settings.get('dot_size', 2)
+            if dot_size == 1:
                 painter.drawPoint(QPointF(dims.center_f, dims.center_f))
             else:
                 painter.drawEllipse(
@@ -338,6 +391,16 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
         self.crosshair = None
         self.settings = self.loadSettings()
         self.monitors = self.getMonitors()
+        
+        # Initialize system tray
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icons', 'crossgen.ico')
+        if os.path.exists(icon_path):
+            self.tray_icon = SystemTray(QtGui.QIcon(icon_path), self)
+            self.tray_icon.show()
+        else:
+            print("Warning: Tray icon file not found:", icon_path)
+            self.tray_icon = None
+            
         self.initUI()
 
     def getMonitors(self):
@@ -371,7 +434,7 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
         self.setLayout(main_layout)
         
         self.setWindowTitle('Crossgen 1.4')
-        self.setFixedWidth(400)
+        self.setFixedWidth(300)  # Reduce window width
         
         # Initial update
         self.updateSettingsAvailability(self.shape_combo.currentText())
@@ -386,187 +449,194 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
         return tabs
 
     def setupBasicTab(self):
-        # Basic tab: shape and color settings.
+        basic_tab = QtWidgets.QWidget()
+        basic_layout = QtWidgets.QVBoxLayout()
+
+        # Shape & Appearance Group
+        shape_group = QtWidgets.QGroupBox("Shape & Appearance")
+        shape_layout = QtWidgets.QGridLayout()
+
+        # First row - Shape and Fill Style
+        shape_layout.addWidget(QtWidgets.QLabel("Shape:"), 0, 0)
         self.shape_combo = QtWidgets.QComboBox()
         self.shape_combo.addItems(['Crosshair', 'Circle', 'T-Shape', 'X-Shape', 'Diamond'])
-        self.shape_combo.currentTextChanged.connect(self.updateSettingsAvailability)
-        
+        shape_layout.addWidget(self.shape_combo, 0, 1)
+
+        shape_layout.addWidget(QtWidgets.QLabel("Fill Style:"), 0, 2)
         self.fill_style_combo = QtWidgets.QComboBox()
         self.fill_style_combo.addItems(['Full', 'Ring'])
-        
+        shape_layout.addWidget(self.fill_style_combo, 0, 3)
+
+        # Second row - Size and Thickness
+        shape_layout.addWidget(QtWidgets.QLabel("Size:"), 1, 0)
         self.size_spin = QtWidgets.QSpinBox()
         self.size_spin.setRange(8, 100)
         self.size_spin.setSingleStep(2)
         self.size_spin.setValue(max(8, self.settings.get('size', 8) // 2 * 2))
-        
+        shape_layout.addWidget(self.size_spin, 1, 1)
+
+        shape_layout.addWidget(QtWidgets.QLabel("Thickness:"), 1, 2)
         self.thickness_spin = QtWidgets.QSpinBox()
         self.thickness_spin.setRange(1, 10)
         self.thickness_spin.setValue(self.settings.get('thickness', 1))
-        
+        shape_layout.addWidget(self.thickness_spin, 1, 3)
+
+        # Third row - Center Gap
+        shape_layout.addWidget(QtWidgets.QLabel("Center Gap:"), 2, 0)
         self.gap_spin = QtWidgets.QSpinBox()
         self.gap_spin.setRange(0, 20)
         self.gap_spin.setValue(self.settings.get('gap', 0))
-        
-        # Group for shape settings.
-        shape_group = QtWidgets.QGroupBox("Shape Settings")
-        shape_layout = QtWidgets.QVBoxLayout()
-        shape_layout.addWidget(QtWidgets.QLabel("Shape:"))
-        shape_layout.addWidget(self.shape_combo)
-        shape_layout.addWidget(QtWidgets.QLabel("Fill Style:"))
-        shape_layout.addWidget(self.fill_style_combo)
-        shape_layout.addWidget(QtWidgets.QLabel("Size:"))
-        shape_layout.addWidget(self.size_spin)
-        shape_layout.addWidget(QtWidgets.QLabel("Line Thickness:"))
-        shape_layout.addWidget(self.thickness_spin)
-        shape_layout.addWidget(QtWidgets.QLabel("Center Gap:"))
-        shape_layout.addWidget(self.gap_spin)
-        
-        shape_group.setLayout(shape_layout)
-        
-        # Color settings.
-        self.color_button = QtWidgets.QPushButton('Primary Color')
-        self.color_button.clicked.connect(lambda: self.openColorPicker('color'))
-        
-        self.outline_check = QtWidgets.QCheckBox('Enable Outline')
-        self.outline_check.setChecked(self.settings.get('outline_enabled', False))
-        self.outline_check.stateChanged.connect(self.updateOutlineAvailability)
-        
-        self.outline_color_button = QtWidgets.QPushButton('Outline Color')
-        self.outline_color_button.setEnabled(self.outline_check.isChecked())
-        self.outline_color_button.clicked.connect(lambda: self.openColorPicker('outline_color'))
-        
-        color_group = QtWidgets.QGroupBox("Color Settings")
-        color_layout = QtWidgets.QVBoxLayout()
-        color_layout.addWidget(self.color_button)
-        color_layout.addWidget(self.outline_check)
-        color_layout.addWidget(self.outline_color_button)
-        color_group.setLayout(color_layout)
-        
-        # Assemble the basic tab.
-        basic_layout = QtWidgets.QVBoxLayout()
-        basic_layout.addWidget(shape_group)
-        basic_layout.addWidget(color_group)
-        basic_tab = QtWidgets.QWidget()
-        basic_tab.setLayout(basic_layout)
-        
-        return basic_tab
+        shape_layout.addWidget(self.gap_spin, 2, 1)
 
-    def setupAdvancedTab(self):
-        # Advanced tab: opacity and monitor settings.
-        advanced_layout = QtWidgets.QVBoxLayout()
-        
-        # Initialize opacity slider
+        shape_group.setLayout(shape_layout)
+
+        # Colors & Outline Group
+        color_group = QtWidgets.QGroupBox("Colors & Outline")
+        color_layout = QtWidgets.QGridLayout()
+
+        # Crosshair Color with preview and opacity
+        color_layout.addWidget(QtWidgets.QLabel("Crosshair:"), 0, 0)
+        color_preview = QtWidgets.QFrame()
+        color_preview.setFixedSize(20, 20)
+        color_preview.setStyleSheet(f"background-color: {self.settings.get('color', '#FF0000')}; border: 1px solid #888;")
+        color_layout.addWidget(color_preview, 0, 1)
+        self.color_button = QtWidgets.QPushButton('Pick')
+        self.color_button.setFixedWidth(50)
+        self.color_button.clicked.connect(lambda: self.openColorPicker('color', color_preview))
+        color_layout.addWidget(self.color_button, 0, 2)
+
+        # Crosshair Opacity
+        color_layout.addWidget(QtWidgets.QLabel("Opacity:"), 1, 0)
         self.opacity_slider = QtWidgets.QSlider(Qt.Horizontal)
         self.opacity_slider.setRange(10, 100)
         self.opacity_slider.setValue(int(self.settings.get('opacity', 100)))
-        
-        advanced_layout.addWidget(QtWidgets.QLabel("Crosshair Opacity:"))
-        advanced_layout.addWidget(self.opacity_slider)
-        
+        color_layout.addWidget(self.opacity_slider, 1, 1, 1, 2)
+
+        # Outline settings
+        self.outline_check = QtWidgets.QCheckBox('Enable Outline')
+        self.outline_check.setChecked(self.settings.get('outline_enabled', False))
+        color_layout.addWidget(self.outline_check, 2, 0, 1, 3)
+
+        # Outline Color with preview and controls
+        color_layout.addWidget(QtWidgets.QLabel("    Outline:"), 3, 0)
+        outline_preview = QtWidgets.QFrame()
+        outline_preview.setFixedSize(20, 20)
+        outline_preview.setStyleSheet(f"background-color: {self.settings.get('outline_color', '#000000')}; border: 1px solid #888;")
+        color_layout.addWidget(outline_preview, 3, 1)
+        self.outline_color_button = QtWidgets.QPushButton('Pick')
+        self.outline_color_button.setFixedWidth(50)
+        self.outline_color_button.clicked.connect(lambda: self.openColorPicker('outline_color', outline_preview))
+        color_layout.addWidget(self.outline_color_button, 3, 2)
+
+        # Outline Opacity
+        color_layout.addWidget(QtWidgets.QLabel("    Opacity:"), 4, 0)
         self.outline_opacity_slider = QtWidgets.QSlider(Qt.Horizontal)
         self.outline_opacity_slider.setRange(10, 100)
         self.outline_opacity_slider.setValue(int(self.settings.get('outline_opacity', 100)))
-        
+        color_layout.addWidget(self.outline_opacity_slider, 4, 1, 1, 2)
+
+        # Outline Thickness
+        color_layout.addWidget(QtWidgets.QLabel("    Thickness:"), 5, 0)
         self.outline_thickness_spin = QtWidgets.QSpinBox()
-        self.outline_thickness_spin.setRange(1, 3)
+        self.outline_thickness_spin.setRange(1, 5)
         self.outline_thickness_spin.setValue(self.settings.get('outline_thickness', 1))
+        color_layout.addWidget(self.outline_thickness_spin, 5, 1, 1, 2)
+
+        color_group.setLayout(color_layout)
+
+        # Connect signals
+        self.shape_combo.currentTextChanged.connect(self.updateSettingsAvailability)
+        self.outline_check.stateChanged.connect(self.updateOutlineAvailability)
         
-        # Monitor settings.
-        self.monitor_combo = QtWidgets.QComboBox()
-        for monitor in self.monitors:
-            self.monitor_combo.addItem(monitor['name'])
+        # Add groups to main layout
+        basic_layout.addWidget(shape_group)
+        basic_layout.addWidget(color_group)
+        basic_layout.addStretch()
         
-        self.resolution_combo = QtWidgets.QComboBox()
-        self.updateResolutionCombo(0)
-        
-        monitor_group = QtWidgets.QGroupBox("Monitor Settings")
-        monitor_layout = QtWidgets.QVBoxLayout()
-        monitor_layout.addWidget(QtWidgets.QLabel("Monitor:"))
-        monitor_layout.addWidget(self.monitor_combo)
-        monitor_layout.addWidget(QtWidgets.QLabel("Resolution:"))
-        monitor_layout.addWidget(self.resolution_combo)
-        monitor_group.setLayout(monitor_layout)
-        
-        # Assemble the advanced tab.
-        advanced_layout.addWidget(QtWidgets.QLabel("Outline Opacity:"))
-        advanced_layout.addWidget(self.outline_opacity_slider)
-        advanced_layout.addWidget(QtWidgets.QLabel("Outline Thickness:"))
-        advanced_layout.addWidget(self.outline_thickness_spin)
-        
-        # Add a new group for advanced shape settings
-        advanced_shape_group = QtWidgets.QGroupBox("Advanced Shape Settings")
-        advanced_shape_layout = QtWidgets.QVBoxLayout()
-        
-        # Add dot customization
+        basic_tab.setLayout(basic_layout)
+        return basic_tab
+
+    def setupAdvancedTab(self):
+        advanced_tab = QtWidgets.QWidget()
+        advanced_layout = QtWidgets.QVBoxLayout()
+
+        # Advanced Settings Group
+        advanced_group = QtWidgets.QGroupBox("Advanced Settings")
+        advanced_settings_layout = QtWidgets.QGridLayout()
+
+        # First row - Draw Center Dot and Size
         self.dot_enabled = QtWidgets.QCheckBox('Draw Center Dot')
         self.dot_enabled.setChecked(self.settings.get('dot_enabled', True))
-        
+        advanced_settings_layout.addWidget(self.dot_enabled, 0, 0)
+
+        advanced_settings_layout.addWidget(QtWidgets.QLabel("Size:"), 0, 1)
         self.dot_size_spin = QtWidgets.QSpinBox()
         self.dot_size_spin.setRange(1, 20)
         self.dot_size_spin.setValue(self.settings.get('dot_size', 2))
         self.dot_size_spin.setEnabled(self.dot_enabled.isChecked())
-        
-        # Add line style options
-        self.line_style_combo = QtWidgets.QComboBox()
-        self.line_style_combo.addItems(['Solid', 'Dotted', 'Dashed'])
-        
-        # Add X angle control
+        advanced_settings_layout.addWidget(self.dot_size_spin, 0, 2)
+
+        # Change X Angle to Crosshair Angle and make it available for multiple shapes
+        advanced_settings_layout.addWidget(QtWidgets.QLabel("Crosshair Angle:"), 1, 0)
         self.angle_spin = QtWidgets.QSpinBox()
-        self.angle_spin.setRange(0, 90)
-        self.angle_spin.setValue(self.settings.get('x_angle', 45))
-        
-        # Add widgets to advanced shape layout
-        advanced_shape_layout.addWidget(self.dot_enabled)
-        advanced_shape_layout.addWidget(QtWidgets.QLabel("Dot Size:"))
-        advanced_shape_layout.addWidget(self.dot_size_spin)
-        advanced_shape_layout.addWidget(QtWidgets.QLabel("Line Style:"))
-        advanced_shape_layout.addWidget(self.line_style_combo)
-        advanced_shape_layout.addWidget(QtWidgets.QLabel("X Angle:"))
-        advanced_shape_layout.addWidget(self.angle_spin)
-        advanced_shape_group.setLayout(advanced_shape_layout)
-        
+        self.angle_spin.setRange(0, 360)  # Expanded range to allow full rotation
+        self.angle_spin.setValue(self.settings.get('crosshair_angle', 45))
+        self.angle_spin.setEnabled(self.shape_combo.currentText() in ['Crosshair', 'X-Shape', 'Diamond'])
+        advanced_settings_layout.addWidget(self.angle_spin, 1, 1, 1, 2)
+
+        advanced_group.setLayout(advanced_settings_layout)
+
+        # Monitor & Resolution Group
+        monitor_group = QtWidgets.QGroupBox("Monitor & Resolution")
+        monitor_layout = QtWidgets.QGridLayout()
+
+        # Monitor and Resolution selection
+        monitor_layout.addWidget(QtWidgets.QLabel("Monitor:"), 0, 0)
+        self.monitor_combo = QtWidgets.QComboBox()
+        for monitor in self.monitors:
+            self.monitor_combo.addItem(monitor['name'])
+        monitor_layout.addWidget(self.monitor_combo, 0, 1)
+
+        monitor_layout.addWidget(QtWidgets.QLabel("Resolution:"), 1, 0)
+        self.resolution_combo = QtWidgets.QComboBox()
+        self.updateResolutionCombo(0)
+        monitor_layout.addWidget(self.resolution_combo, 1, 1)
+
+        monitor_group.setLayout(monitor_layout)
+
+        # Add groups to main layout
+        advanced_layout.addWidget(advanced_group)
+        advanced_layout.addWidget(monitor_group)
+        advanced_layout.addStretch()
+
         # Connect signals
         self.dot_enabled.stateChanged.connect(self.dot_size_spin.setEnabled)
         self.dot_enabled.stateChanged.connect(self.updateCrosshair)
         self.dot_size_spin.valueChanged.connect(self.updateCrosshair)
         self.angle_spin.valueChanged.connect(self.updateCrosshair)
-        self.line_style_combo.currentTextChanged.connect(self.updateCrosshair)
-        
-        # Add the new group to advanced layout before monitor_group
-        advanced_layout.addWidget(advanced_shape_group)
-        advanced_layout.addWidget(monitor_group)
-        
-        advanced_tab = QtWidgets.QWidget()
+        self.monitor_combo.currentIndexChanged.connect(self.updateResolutionCombo)
+        self.resolution_combo.currentIndexChanged.connect(self.handleResolutionChange)
+
         advanced_tab.setLayout(advanced_layout)
-        
-        # Connect signals to updateCrosshair
-        self.outline_opacity_slider.valueChanged.connect(self.updateCrosshair)
-        self.outline_thickness_spin.valueChanged.connect(self.updateCrosshair)
-        
         return advanced_tab
 
     def setupControlButtons(self):
-        # Control buttons at the bottom.
         button_layout = QtWidgets.QHBoxLayout()
         
-        self.apply_button = QtWidgets.QPushButton('Apply Changes')
-        self.apply_button.clicked.connect(self.updateCrosshair)
-        button_layout.addWidget(self.apply_button)
+        buttons = {
+            'Apply': self.updateCrosshair,
+            'Save': self.savePreset,
+            'Load': self.loadPreset,
+            'Clear': self.clearPreset
+        }
         
-        self.save_button = QtWidgets.QPushButton('Save Preset')
-        self.save_button.clicked.connect(self.savePreset)
-        button_layout.addWidget(self.save_button)
-        
-        self.load_button = QtWidgets.QPushButton('Load Preset')
-        self.load_button.clicked.connect(self.loadPreset)
-        button_layout.addWidget(self.load_button)
-        
-        self.clear_button = QtWidgets.QPushButton('Clear Preset')
-        self.clear_button.clicked.connect(self.clearPreset)
-        button_layout.addWidget(self.clear_button)
+        for text, callback in buttons.items():
+            btn = QtWidgets.QPushButton(text)
+            btn.setFixedWidth(60)
+            btn.clicked.connect(callback)
+            button_layout.addWidget(btn)
         
         return button_layout
-
 
     def loadSettings(self):
         settings = QSettings('EnhancedCrossgen', 'Preferences')
@@ -576,7 +646,7 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
             return {
                 'color': '#FF0000',
                 'size': 8,
-                'shape': 'Crosshair',  # Changed default shape to Crosshair
+                'shape': 'Crosshair',
                 'thickness': 1,
                 'fill_style': 'Full',
                 'opacity': 100,
@@ -588,11 +658,10 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
                 'monitor_index': 0,
                 'resolution': 'Native',
                 'custom_resolution': None,
-                'outline_thickness': 1,  # Add this line
+                'outline_thickness': 1,
                 'dot_enabled': True,
                 'dot_size': 2,
-                'line_style': 'Solid',
-                'x_angle': 45,
+                'crosshair_angle': 0,  # Replace x_angle with crosshair_angle
             }
 
     def saveSettings(self):
@@ -606,20 +675,24 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
         # Enable gap for all shapes except Circle
         self.gap_spin.setEnabled(shape in ['Crosshair', 'T-Shape', 'X-Shape', 'Diamond'])
         
-        # Enable X angle only for X-Shape
-        self.angle_spin.setEnabled(shape == 'X-Shape')
+        # Enable angle spinner for multiple shapes
+        self.angle_spin.setEnabled(shape in ['Crosshair', 'X-Shape', 'Diamond'])
         
         # Enable outline for all shapes
         self.outline_check.setEnabled(True)
         self.updateOutlineAvailability()
 
     def updateOutlineAvailability(self):
-        self.outline_color_button.setEnabled(self.outline_check.isChecked())
+        enabled = self.outline_check.isChecked()
+        self.outline_color_button.setEnabled(enabled)
+        self.outline_opacity_slider.setEnabled(enabled)
+        self.outline_thickness_spin.setEnabled(enabled)
 
-    def openColorPicker(self, color_type):
+    def openColorPicker(self, color_type, preview_widget):
         color = QtWidgets.QColorDialog.getColor()
         if (color.isValid()):
             self.settings[color_type] = color.name()
+            preview_widget.setStyleSheet(f"background-color: {color.name()}; border: 1px solid #888;")
             if self.crosshair:
                 self.updateCrosshair()
 
@@ -640,29 +713,23 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
                     QtWidgets.QMessageBox.warning(self, "Error", "Invalid resolution values")
 
     def updateCrosshair(self):
-        self.settings.update({
-            # ...existing settings...
-            'x_angle': self.angle_spin.value(),
-            'dot_enabled': self.dot_enabled.isChecked(),
-            'dot_size': self.dot_size_spin.value() if self.dot_enabled.isChecked() else 0,
-            'line_style': self.line_style_combo.currentText()
-        })
         try:
             # Update settings from UI controls
             self.settings.update({
                 'monitor_index': self.monitor_combo.currentIndex(),
                 'resolution': self.resolution_combo.currentText(),
-                'shape': self.shape_combo.currentText(),  # Make sure this is being set correctly
+                'shape': self.shape_combo.currentText(),
                 'size': self.size_spin.value() // 2 * 2,
                 'thickness': self.thickness_spin.value(),
                 'gap': self.gap_spin.value(),
                 'opacity': self.opacity_slider.value(),
-                'outline_opacity': self.outline_opacity_slider.value(),
                 'outline_enabled': self.outline_check.isChecked(),
+                'outline_opacity': self.outline_opacity_slider.value(),
+                'outline_thickness': self.outline_thickness_spin.value(),
                 'fill_style': self.fill_style_combo.currentText(),
-                'color': self.settings.get('color', '#FF0000'),
-                'outline_color': self.settings.get('outline_color', '#000000'),
-                'outline_thickness': self.outline_thickness_spin.value()
+                'crosshair_angle': self.angle_spin.value(),  # Update angle for all supported shapes
+                'dot_enabled': self.dot_enabled.isChecked(),
+                'dot_size': self.dot_size_spin.value() if self.dot_enabled.isChecked() else 0,
             })
 
             # Close existing crosshair if it exists
@@ -769,9 +836,13 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
 
 
     def closeEvent(self, event):
-        if self.crosshair:
-            self.crosshair.close()
-        event.accept()
+        if hasattr(self, 'tray_icon') and self.tray_icon:
+            self.hide()
+            event.ignore()  # Prevent the window from being destroyed
+        else:
+            if self.crosshair:
+                self.crosshair.close()
+            event.accept()
 
     def updateXAngleAvailability(self, shape):
         """Enable X Angle spinner only for X-Shape"""
@@ -780,19 +851,22 @@ class AdvancedSettingsWindow(QtWidgets.QWidget):
 if __name__ == '__main__':
     app = QtWidgets.QApplication([])
     
+    # Prevent the application from exiting when all windows are closed
+    app.setQuitOnLastWindowClosed(False)
+    
     # Use the helper function to obtain the application icon
     app_icon = get_app_icon()
     if app_icon:
         app.setWindowIcon(app_icon)
     
-    # Create and show the main window (AdvancedSettingsWindow should be imported or defined above)
+    # Create and show the main window
     ex = AdvancedSettingsWindow()
     
     if app_icon:
         ex.setWindowIcon(app_icon)
         try:
             import ctypes
-            myappid = 'crossgen.1.3.0'  # Arbitrary unique string for Windows taskbar icon grouping
+            myappid = 'crossgen.1.3.0'
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except Exception:
             pass
